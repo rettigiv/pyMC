@@ -19,6 +19,8 @@ class Molecule:
         self.sigma = sigma
         self.epsilon = epsilon
 
+        self.color = 0
+
 
 
 numMols = 0
@@ -28,7 +30,7 @@ boxY = 1.0
 boxZ = 1.0
 
 universe = MDAnalysis.Universe(('startVMD' + sys.argv[1][2:sys.argv[1].index('.')]+ '.gro'))
-writer = MDAnalysis.Writer(('out' + sys.argv[1][2:sys.argv[1].index('.')] + '.trr'), 1)
+writer = MDAnalysis.Writer(('out.trr'), 1)
 outColor = open('color.txt','w')
 E = 0.0
 avgEn = 0.0
@@ -41,6 +43,7 @@ T = 0.0
 N = 0
 nSteps = 0
 stepNum = 1
+frameNum = 2
 densCenter = 0.0
 densities = [0]*1000
 Z = 0.0
@@ -48,6 +51,10 @@ Z = 0.0
 numLower = 0
 numHigherAcc = 0
 numHigherRej = 0
+
+selectColor = 25
+acceptColor = 50
+rejectColor = 100
 
 def wrapDist(x1, x2):
     return min(abs(x1 - x2), abs(1-max(x1,x2) + min(x1,x2)))
@@ -97,24 +104,27 @@ def Hamiltonian():
 
 
 def writeCoords():
+    global frameNum
+    
     for i in range(0,N):
         universe.atoms[i].position = [molecules[i].x * 10.0, molecules[i].y*10.0, molecules[i].z*10.0]
+        if(molecules[i].color != 0):
+            outColor.write('%d %d %d; ' % (frameNum, i, molecules[i].color))
+    outColor.write('\n')
     writer.write(universe.atoms)
+    frameNum += 1
 
-def writeColor(i, c):
-    outColor.write('%d %d\n' %(i, c))
-
-        
+    
 def shiftMol(mol):
     mol.x = (mol.x + (maxChangeDist * 2 * random() - maxChangeDist)) % boxX
     mol.y = (mol.y + (maxChangeDist * 2 * random() - maxChangeDist)) % boxY
     mol.z = (mol.z + (maxChangeDist * 2 * random() - maxChangeDist)) % boxZ
-    
+
 
 def stepZ():
     global E
     global Z
-    
+
     # move a random molecule
     for molInd in range(0,N):
         sMol = molecules[molInd]
@@ -138,28 +148,24 @@ def step():
     global numHigherAcc
     global numHigherRej
     global Z
-    
+
     # move a random molecule
     sMol = molecules[int(random()*N)]
-
-    # color the particle to chosen
-    writeColor(sMol.i, 50)
+    sMol.color = selectColor
     writeCoords()
-    
+
     smX = sMol.x
     smY = sMol.y
     smZ = sMol.z
     shiftMol(sMol)
-
-    # now show shifted particle
     writeCoords()
 
     En = Hamiltonian()
     if(En < E):
         # downhill, keep it
-        E = En
+        e = En
         numLower += 1
-        writeColor(sMol.i, 100)
+        sMol.color = acceptColor
     else:
         # uphill, take it with boltzmann prob
         binNum = int((En - densCenter*0.4)/(densCenter*0.8) * 1000)
@@ -172,21 +178,23 @@ def step():
         if(random() < prob):
             # keep the change
             E = En
-            writeColor(sMol.i, 100)
             numHigherAcc += 1
+            sMol.color = acceptColor
         else:
             # revert change
-            shiftMol.x = smX
-            shiftMol.y = smY
-            shiftMol.z = smZ
-            writeColor(sMol.i, 25)
             numHigherRej += 1
+            sMol.color = rejectColor
 
     #display colored mol then uncolor
     writeCoords()
-    writeColor(sMol.i, 0)
+    if(sMol.color == rejectColor):
+        sMol.x = smX
+        sMol.y = smY
+        sMol.z = smZ
+    sMol.color = 0
+    writeCoords()
 
-    
+
     #store step energy for avg at end
     avgEn = avgEn + E
 
@@ -235,16 +243,15 @@ def main():
     densCenter = E
     for sNum in range(1,nSteps):
         stepZ()
-    #writer.close()
-    #writer = MDAnalysis.Writer('out.trr', N)
-    #writer.write(universe.atoms)
+    writer.close()
+    writer = MDAnalysis.Writer(('out' + sys.argv[1][2:sys.argv[1].index('.')] + '.trr'), N)
+    writer.write(universe.atoms)
     writeCoords()
     
 
     # loop through MC steps
     for stepNum in range(1, nSteps):
         step()
-        writeCoords()
 
     #writer.close()
     print('kJ = %f\n' % (avgEn / nSteps))
